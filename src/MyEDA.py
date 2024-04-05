@@ -14,6 +14,12 @@
 #   - correlation_matrix for build correlation matix in heatmap           #
 #   - numerical_box for plot boxplot of numerical variables from a list   #
 #   - outliers_iqr for drop or sustitute outliers in a iqr*sigma          #
+#   - splitter for split in train and test all csv from a root and save   #
+#   - normalize for normalice X_train and X_test by any scaler of         #
+#     sklearn.preprocessing module                                        #
+#   - feature_sel for make feature selection by any method and with any   #
+#     test included in sklearn.feature_selection                          #
+###########################################################################
 
 
 def get_column_type(series):
@@ -45,7 +51,7 @@ def explore(data_frame):
     
     return categorical_columns, numeric_columns
 
-def FindDuplicates(data_frame, id_col, Drop):    
+def FindDuplicates(data_frame, id_col, Drop=False):    
     if Drop == 'True':
         deduplicated_df = data_frame.drop_duplicates(data_frame.columns.difference([id_col]))
         if len(deduplicated_df) < len(data_frame):
@@ -158,7 +164,7 @@ def numerical_box(variables, data_frame, color_='#1295a6'):
     
     plt.tight_layout()
 
-def outliers_iqr(df,var,sigma,Do='drop'):
+def outliers_iqr(df,var,sigma,Do='nothing'):
     #df: dataframe
     #var: variable
     #sigma: tolerance for iqr
@@ -177,18 +183,98 @@ def outliers_iqr(df,var,sigma,Do='drop'):
     outliers = df_[(df_[var] >= upper_l) | (df_[var] < lower_l)]
     num_outliers = outliers.shape[0]     
 
-    if Do != 'drop':
-        if Do == 'mode':
-            replacer = df_[var].mode()                    
-        elif Do == 'mean':
-            replacer = df_[var].mean()
-        elif Do == 'median':
-            replacer = df_[var].median()
-
-        replace_func = lambda x: x if lower_l <= x < upper_l else replacer
-        df_[var] = df_[var].apply(replace_func)        
-        print(str(num_outliers)+' outliers have been treated by replacing them with the '+Do)
+    if Do == 'nothing':
+        print(str(num_outliers)+' outliers have been found')
+        pass
     else:
-        df_ = df_[var].between(lower_l, upper_l)
-        print(str(num_outliers)+' outliers have been treated by dropping')
+        if Do != 'drop':
+            if Do == 'mode':
+                replacer = df_[var].mode()                    
+            elif Do == 'mean':
+                replacer = df_[var].mean()
+            elif Do == 'median':
+                replacer = df_[var].median()
+
+            replace_func = lambda x: x if lower_l <= x < upper_l else replacer
+            df_[var] = df_[var].apply(replace_func)        
+            print(str(num_outliers)+' outliers have been treated by replacing them with the '+Do)
+        else:
+            df_ = df_[var].between(lower_l, upper_l)
+            print(str(num_outliers)+' outliers have been treated by dropping')
     return outliers,df_
+    
+
+def splitter(origin_root,predictors,target):
+    import os
+    from sklearn.model_selection import train_test_split
+    csv_files = []
+
+    for file in os.listdir(origin_root):
+        if file.endswith(".csv"):
+            csv_files.append(os.path.join(origin_root, file))
+    
+    for df_root in csv_files:
+        df = pd.read_csv(df_root)
+        X = df[predictors]
+        Y = df[target]
+
+        X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size = 0.3, random_state = 42)
+        
+        name = (df_root.split('/'))[-1].split('.')[0]       
+        destino =origin_root+'SplitData/'
+        if not os.path.exists(destino):
+            os.makedirs(destino)
+
+        X_train.to_csv(destino+name+'_Xtrain.csv', index=False)
+        X_test.to_csv(destino+name+'_Xtest.csv', index=False)
+        y_train.to_csv(destino+name+'_ytrain.csv', index=False)
+        y_test.to_csv(destino+name+'_ytest.csv', index=False)
+                      
+def normalize(origin_root,predictors,scaler_='StandardScaler'):
+    # origin_root: root of X_train, X_test in processed/SplitData
+    # predictors: variables except target (numeric)
+    # scaler: any scaler from sklearn.preprocessing
+    import importlib
+    import os
+    module = importlib.import_module('sklearn.preprocessing')
+    submodule = getattr(module, scaler_)
+    scaler = submodule()
+    csv_files = []
+
+    for file in os.listdir(origin_root):
+        if file.endswith(".csv"):
+            csv_files.append(os.path.join(origin_root, file))
+    
+    for df_root in csv_files:
+        if '_X' in str(df_root):
+            df = pd.read_csv(df_root)
+
+            scaler.fit(df)
+            scaler_df = scaler.transform(df)
+            scaler_df = pd.DataFrame(scaler_df,index = df.index, columns = predictors)
+            
+            name = (df_root.split('/'))[-1].split('.')[0]       
+            destino =origin_root+'NormData/'
+            if not os.path.exists(destino):
+                os.makedirs(destino)
+
+            scaler_df.to_csv(destino+name+'_norm.csv', index=False)
+
+def feature_sel(X_train_,y_train_,k_,file_name,method_='SelectKBest', test_='mutual_info_classif'):
+    import importlib
+    import os
+    module = importlib.import_module('sklearn.feature_selection')
+    method = getattr(module, method_)
+    test = getattr(module, test_)
+    test_to_apply = method(test)
+        
+    selection_model = method(test, k = k_)
+    selection_model.fit(X_train_, y_train_)
+    ix = selection_model.get_support()
+    X_train_sel = pd.DataFrame(selection_model.transform(X_train_), columns = X_train_.columns.values[ix])
+
+    if not os.path.exists('../data/processed/SplitData/FeatureSel/'):
+            os.makedirs('../data/processed/SplitData/FeatureSel/')
+    X_train_sel.to_csv('../data/processed/SplitData/FeatureSel/'+str(file_name)+'_FeatureSel.csv', index=False)
+
+    return X_train_sel
